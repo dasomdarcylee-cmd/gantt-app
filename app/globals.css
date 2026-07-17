@@ -41,6 +41,20 @@ textarea:focus {
   border-color: #888780;
 }
 
+.subname-input {
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+}
+.subname-input:hover {
+  border-color: #d8d5cc;
+}
+.subname-input:focus {
+  border-color: #185fa5;
+  background: #fff;
+  color: #1a1a18;
+}
+
 /* To Do styles */
 .todo-container {
   background: #fff;

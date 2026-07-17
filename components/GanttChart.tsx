@@ -13,6 +13,8 @@ interface SubTask {
   shape: Shape;
   memo: string;
   memoOpen: boolean;
+  comment: string;
+  commentOpen: boolean;
 }
 
 interface Task extends SubTask {
@@ -37,8 +39,8 @@ const SHAPES: Shape[] = ["rect", "pill", "diamond"];
 const ROW_HEIGHT = 40;
 const MEMO_HEIGHT = 64;
 const ASSIGNEE_WIDTH = 90;
-const LABEL_WIDTH = 170;
-const DATE_COL_WIDTH = 190;
+const LABEL_WIDTH = 240;
+const DATE_COL_WIDTH = 120;
 const MONTH_ROW_HEIGHT = 20;
 const DAY_ROW_HEIGHT = 36;
 const TOTAL_HEADER_HEIGHT = MONTH_ROW_HEIGHT + DAY_ROW_HEIGHT;
@@ -48,7 +50,14 @@ const STORAGE_KEY = "gantt-v2";
 
 // ---- Helpers ----
 function fmt(d: Date): string {
-  return d.toISOString().slice(0, 10);
+  // toISOString() converts to UTC, which shifts the date back a day in
+  // timezones ahead of UTC (e.g. KST). Format from local fields instead.
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${m}-${day}`;
+}
+function fmtShort(s: string): string {
+  return s.slice(5);
 }
 function addDays(d: Date, n: number): Date {
   const r = new Date(d);
@@ -77,11 +86,15 @@ function loadFromStorage(): StoredData | null {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
     const data = JSON.parse(raw) as StoredData;
-    // Migrate: ensure dependsOn exists
+    // Migrate: ensure dependsOn and comment fields exist
     data.tasks = data.tasks.map((t) => ({
       ...t,
       dependsOn: t.dependsOn ?? [],
-      subtasks: t.subtasks.map((s) => s),
+      subtasks: t.subtasks.map((s) => ({
+        ...s,
+        comment: s.comment ?? "",
+        commentOpen: s.commentOpen ?? false,
+      })),
     }));
     return data;
   } catch {
@@ -105,10 +118,12 @@ function makeInitialTasks(): Task[] {
       expanded: true,
       memo: "",
       memoOpen: false,
+      comment: "",
+      commentOpen: false,
       dependsOn: [],
       subtasks: [
-        { id: 101, name: "설문 조사", start: fmt(addDays(today, -2)), end: fmt(addDays(today, -1)), colorIdx: 4, shape: "rect", memo: "", memoOpen: false },
-        { id: 102, name: "요구사항 문서화", start: fmt(today), end: fmt(addDays(today, 1)), colorIdx: 4, shape: "rect", memo: "", memoOpen: false },
+        { id: 101, name: "설문 조사", start: fmt(addDays(today, -2)), end: fmt(addDays(today, -1)), colorIdx: 4, shape: "rect", memo: "", memoOpen: false, comment: "", commentOpen: false },
+        { id: 102, name: "요구사항 문서화", start: fmt(today), end: fmt(addDays(today, 1)), colorIdx: 4, shape: "rect", memo: "", memoOpen: false, comment: "", commentOpen: false },
       ],
     },
     {
@@ -122,10 +137,12 @@ function makeInitialTasks(): Task[] {
       expanded: false,
       memo: "",
       memoOpen: false,
+      comment: "",
+      commentOpen: false,
       dependsOn: [1],
       subtasks: [
-        { id: 201, name: "와이어프레임", start: fmt(addDays(today, 2)), end: fmt(addDays(today, 3)), colorIdx: 0, shape: "rect", memo: "", memoOpen: false },
-        { id: 202, name: "시각 디자인", start: fmt(addDays(today, 4)), end: fmt(addDays(today, 6)), colorIdx: 0, shape: "rect", memo: "", memoOpen: false },
+        { id: 201, name: "와이어프레임", start: fmt(addDays(today, 2)), end: fmt(addDays(today, 3)), colorIdx: 0, shape: "rect", memo: "", memoOpen: false, comment: "", commentOpen: false },
+        { id: 202, name: "시각 디자인", start: fmt(addDays(today, 4)), end: fmt(addDays(today, 6)), colorIdx: 0, shape: "rect", memo: "", memoOpen: false, comment: "", commentOpen: false },
       ],
     },
     {
@@ -139,6 +156,8 @@ function makeInitialTasks(): Task[] {
       expanded: false,
       memo: "",
       memoOpen: false,
+      comment: "",
+      commentOpen: false,
       dependsOn: [2],
       subtasks: [],
     },
@@ -153,6 +172,8 @@ function makeInitialTasks(): Task[] {
       expanded: false,
       memo: "",
       memoOpen: false,
+      comment: "",
+      commentOpen: false,
       dependsOn: [3],
       subtasks: [],
     },
@@ -163,7 +184,45 @@ type Row =
   | { type: "task"; task: Task; num: number; top: number; h: number }
   | { type: "subtask"; task: Task; sub: SubTask; top: number; h: number }
   | { type: "memo"; task: Task; sub: SubTask | null; top: number; h: number }
+  | { type: "comment"; task: Task; sub: SubTask; top: number; h: number }
   | { type: "addsub"; task: Task; top: number; h: number };
+
+// Shows a compact MM-DD label but keeps a full native date input on top (invisible)
+// so clicking still opens the browser's date picker with the year intact.
+function DateField({
+  value, onChange, min, max,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  min?: string;
+  max?: string;
+}) {
+  return (
+    <div style={{ position: "relative", flex: "0 0 44px", width: 44, height: 25 }}>
+      <span
+        style={{
+          position: "absolute", inset: 0, display: "flex", alignItems: "center", padding: "0 3px",
+          fontSize: 11, border: "0.5px solid #d8d5cc", borderRadius: 6, background: "#fff", color: "#1a1a18",
+          fontVariantNumeric: "tabular-nums", boxSizing: "border-box", whiteSpace: "nowrap", overflow: "hidden",
+          pointerEvents: "none",
+        }}
+      >
+        {fmtShort(value)}
+      </span>
+      <input
+        type="date"
+        value={value}
+        min={min}
+        max={max}
+        onChange={(e) => onChange(e.target.value)}
+        style={{
+          position: "absolute", inset: 0, width: "100%", height: "100%", opacity: 0, cursor: "pointer",
+          border: "none", padding: 0, margin: 0,
+        }}
+      />
+    </div>
+  );
+}
 
 export default function GanttChart() {
   const saved = useMemo(() => loadFromStorage(), []);
@@ -220,12 +279,15 @@ export default function GanttChart() {
   const rows: Row[] = useMemo(() => {
     const list: Row[] = [];
     tasks.forEach((t, i) => {
-      list.push({ type: "task", task: t, num: i + 1, top: 0, h: ROW_HEIGHT });
+      // Rows with dependency tags get extra height so the tags can wrap onto
+      // their own line below the (now narrower) date fields instead of clipping them.
+      list.push({ type: "task", task: t, num: i + 1, top: 0, h: ROW_HEIGHT + (t.dependsOn.length > 0 ? 16 : 0) });
       if (t.expanded) {
         if (t.memoOpen) list.push({ type: "memo", task: t, sub: null, top: 0, h: MEMO_HEIGHT });
         t.subtasks.forEach((sub) => {
           list.push({ type: "subtask", task: t, sub, top: 0, h: ROW_HEIGHT });
           if (sub.memoOpen) list.push({ type: "memo", task: t, sub, top: 0, h: MEMO_HEIGHT });
+          if (sub.commentOpen) list.push({ type: "comment", task: t, sub, top: 0, h: MEMO_HEIGHT });
         });
         list.push({ type: "addsub", task: t, top: 0, h: ROW_HEIGHT });
       }
@@ -283,6 +345,9 @@ export default function GanttChart() {
   function toggleSubMemo(taskId: number, subId: number) {
     updateSub(taskId, subId, (s) => ({ ...s, memoOpen: !s.memoOpen }));
   }
+  function toggleSubComment(taskId: number, subId: number) {
+    updateSub(taskId, subId, (s) => ({ ...s, commentOpen: !s.commentOpen }));
+  }
   function deleteTask(taskId: number) {
     setTasks((prev) => {
       pushUndo(prev);
@@ -307,7 +372,7 @@ export default function GanttChart() {
       expanded: true,
       subtasks: [
         ...t.subtasks,
-        { id, name: "새 세부 일정", start: fmt(today), end: fmt(addDays(today, 2)), colorIdx: 0, shape: "rect", memo: "", memoOpen: false },
+        { id, name: "새 세부 일정", start: fmt(today), end: fmt(addDays(today, 2)), colorIdx: 0, shape: "rect", memo: "", memoOpen: false, comment: "", commentOpen: false },
       ],
     }));
   }
@@ -329,6 +394,8 @@ export default function GanttChart() {
         expanded: false,
         memo: "",
         memoOpen: false,
+        comment: "",
+        commentOpen: false,
         dependsOn: [],
         subtasks: [],
       },
@@ -433,10 +500,17 @@ export default function GanttChart() {
       if (!d) return;
       const dx = e.clientX - d.startX;
       const dayDelta = Math.round(dx / dayWidth);
+      // Bars can't move earlier than the calendar's leftmost visible date —
+      // otherwise they'd slide behind the frozen assignee/label/date panel and become unreachable.
       function apply(start: string, end: string): { start: string; end: string } {
-        if (d!.mode === "move") return { start: fmt(addDays(d!.origStart, dayDelta)), end: fmt(addDays(d!.origEnd, dayDelta)) };
+        if (d!.mode === "move") {
+          const minDelta = diffDays(d!.origStart, rangeStart);
+          const delta = Math.max(dayDelta, minDelta);
+          return { start: fmt(addDays(d!.origStart, delta)), end: fmt(addDays(d!.origEnd, delta)) };
+        }
         if (d!.mode === "left") {
-          const ns = addDays(d!.origStart, dayDelta);
+          let ns = addDays(d!.origStart, dayDelta);
+          if (diffDays(rangeStart, ns) < 0) ns = rangeStart;
           if (diffDays(ns, d!.origEnd) >= 0) return { start: fmt(ns), end };
           return { start, end };
         }
@@ -454,7 +528,7 @@ export default function GanttChart() {
       document.removeEventListener("mousemove", onMove);
       document.removeEventListener("mouseup", onUp);
     };
-  }, [dayWidth]);
+  }, [dayWidth, rangeStart]);
 
   // ---- Row reorder mousemove / mouseup ----
   useEffect(() => {
@@ -771,6 +845,23 @@ export default function GanttChart() {
                 );
               }
 
+              // ---- COMMENT row ----
+              if (row.type === "comment") {
+                return (
+                  <div key={`row-${idx}`} style={{ position: "absolute", left: 0, top, width: fullWidth, height: row.h, borderBottom: "0.5px solid #d8d5cc", background: "#e6f1fb", zIndex: 1, padding: 8, boxSizing: "border-box" }}>
+                    <div style={{ width: leftWidth - 16, height: MEMO_HEIGHT - 16, border: "2px dashed #185fa5", borderRadius: 6, boxSizing: "border-box", background: "#fff", overflow: "hidden", display: "flex", flexDirection: "column", gap: 2, padding: "6px 8px" }}>
+                      <div style={{ fontSize: 10, fontWeight: 700, color: "#185fa5", flexShrink: 0 }}>Comment</div>
+                      <textarea
+                        value={row.sub.comment}
+                        placeholder="코멘트를 입력하세요"
+                        onChange={(e) => updateSub(row.task.id, row.sub.id, (s) => ({ ...s, comment: e.target.value }))}
+                        style={{ flex: 1, width: "100%", fontSize: 11, resize: "none", padding: 0, boxSizing: "border-box", border: "none", outline: "none", background: "transparent", display: "block" }}
+                      />
+                    </div>
+                  </div>
+                );
+              }
+
               // ---- ADDSUB row ----
               if (row.type === "addsub") {
                 return (
@@ -803,17 +894,17 @@ export default function GanttChart() {
                         {hasSub ? (t.expanded ? "▾" : "▸") : "·"}
                       </button>
                       <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", flex: 1, fontWeight: 500 }}>{row.num}. {t.name}</span>
-                      <button onClick={() => toggleTaskMemo(t.id)} style={{ width: 20, height: 20, padding: 0, borderRadius: "50%", flexShrink: 0, color: memoActive ? "#185fa5" : "#9a988f" }}>✎</button>
+                      <button onClick={() => toggleTaskMemo(t.id)} title="메모" style={{ width: 20, height: 20, padding: 0, borderRadius: "50%", flexShrink: 0, color: memoActive ? "#185fa5" : "#9a988f" }}>🗒</button>
                       <button onClick={() => handleLinkClick(t.id)} title={isLinkSrc ? "연결 취소" : "의존 관계 연결"} style={{ width: 20, height: 20, padding: 0, borderRadius: "50%", flexShrink: 0, background: isLinkSrc ? "#185fa5" : undefined, color: isLinkSrc ? "#fff" : "#9a988f" }}>→</button>
                       <button onClick={() => deleteTask(t.id)} style={{ width: 20, height: 20, padding: 0, borderRadius: "50%", flexShrink: 0 }}>✕</button>
                     </div>
                     {/* Date inputs */}
-                    <div style={{ position: "absolute", left: ASSIGNEE_WIDTH + LABEL_WIDTH, top, width: DATE_COL_WIDTH, height: row.h, display: "flex", alignItems: "center", gap: 4, padding: "0 6px", borderBottom: "0.5px solid #d8d5cc", background: bg, zIndex: 1, boxSizing: "border-box" }}>
-                      <input type="date" value={t.start} max={t.end} onChange={(e) => updateTask(t.id, (tt) => ({ ...tt, start: e.target.value }))} style={{ flex: 1, fontSize: 11, height: 24, padding: "0 2px" }} />
+                    <div style={{ position: "absolute", left: ASSIGNEE_WIDTH + LABEL_WIDTH, top, width: DATE_COL_WIDTH, height: row.h, display: "flex", alignItems: "center", gap: 4, padding: "0 6px", borderBottom: "0.5px solid #d8d5cc", background: bg, zIndex: 1, boxSizing: "border-box", flexWrap: "wrap", alignContent: "flex-start" }}>
+                      <DateField value={t.start} max={t.end} onChange={(v) => updateTask(t.id, (tt) => ({ ...tt, start: v }))} />
                       <span style={{ color: "#9a988f", fontSize: 10 }}>~</span>
-                      <input type="date" value={t.end} min={t.start} onChange={(e) => updateTask(t.id, (tt) => ({ ...tt, end: e.target.value }))} style={{ flex: 1, fontSize: 11, height: 24, padding: "0 2px" }} />
+                      <DateField value={t.end} min={t.start} onChange={(v) => updateTask(t.id, (tt) => ({ ...tt, end: v }))} />
                       {t.dependsOn.length > 0 && (
-                        <div style={{ fontSize: 10, color: "#888", display: "flex", gap: 2, flexWrap: "wrap" }}>
+                        <div style={{ fontSize: 10, color: "#888", display: "flex", gap: 2, flexWrap: "wrap", width: "100%", marginTop: 2 }}>
                           {t.dependsOn.map((depId) => {
                             const depTask = tasks.find((tt) => tt.id === depId);
                             return (
@@ -831,20 +922,28 @@ export default function GanttChart() {
 
               // ---- SUBTASK row ----
               const memoActiveS = row.sub.memoOpen || row.sub.memo.length > 0;
+              const commentActiveS = row.sub.commentOpen || row.sub.comment.length > 0;
               return (
                 <div key={`row-${idx}`}>
                   <div style={{ position: "absolute", left: 0, top, width: ASSIGNEE_WIDTH, height: row.h, borderBottom: "0.5px solid #d8d5cc", borderRight: "0.5px solid #d8d5cc", background: "#f1efe8", zIndex: 1, boxSizing: "border-box" }} />
                   <div style={{ position: "absolute", left: ASSIGNEE_WIDTH, top, width: LABEL_WIDTH, height: row.h, display: "flex", alignItems: "center", gap: 2, padding: "0 4px 0 8px", borderBottom: "0.5px solid #d8d5cc", background: "#f1efe8", zIndex: 1, boxSizing: "border-box" }}>
                     <span onMouseDown={(e) => startRowDrag(e, "subtask", row.task.id, row.sub.id)} style={{ cursor: "grab", color: "#ccc", fontSize: 14, flexShrink: 0, userSelect: "none", padding: "0 2px" }} title="드래그해서 순서 변경">⠿</span>
-                    <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", flex: 1, fontSize: 12, color: "#6b6a64" }}>{row.sub.name}</span>
-                    <button onClick={() => toggleSubMemo(row.task.id, row.sub.id)} style={{ width: 20, height: 20, padding: 0, borderRadius: "50%", flexShrink: 0, color: memoActiveS ? "#185fa5" : "#9a988f" }}>✎</button>
+                    <input
+                      type="text"
+                      className="subname-input"
+                      value={row.sub.name}
+                      onChange={(e) => updateSub(row.task.id, row.sub.id, (s) => ({ ...s, name: e.target.value }))}
+                      style={{ flex: 1, minWidth: 0, height: 22, fontSize: 12, color: "#6b6a64", padding: "0 4px" }}
+                    />
+                    <button onClick={() => toggleSubMemo(row.task.id, row.sub.id)} title="메모" style={{ width: 20, height: 20, padding: 0, borderRadius: "50%", flexShrink: 0, color: memoActiveS ? "#185fa5" : "#9a988f" }}>🗒</button>
+                    <button onClick={() => toggleSubComment(row.task.id, row.sub.id)} title="코멘트" style={{ width: 20, height: 20, padding: 0, borderRadius: "50%", flexShrink: 0, color: commentActiveS ? "#185fa5" : "#9a988f" }}>✓</button>
                     <button onClick={() => deleteSub(row.task.id, row.sub.id)} style={{ width: 20, height: 20, padding: 0, borderRadius: "50%", flexShrink: 0 }}>✕</button>
                   </div>
                   {/* Date inputs for subtask */}
                   <div style={{ position: "absolute", left: ASSIGNEE_WIDTH + LABEL_WIDTH, top, width: DATE_COL_WIDTH, height: row.h, display: "flex", alignItems: "center", gap: 4, padding: "0 6px", borderBottom: "0.5px solid #d8d5cc", background: "#f1efe8", zIndex: 1, boxSizing: "border-box" }}>
-                    <input type="date" value={row.sub.start} max={row.sub.end} onChange={(e) => updateSub(row.task.id, row.sub.id, (s) => ({ ...s, start: e.target.value }))} style={{ flex: 1, fontSize: 11, height: 24, padding: "0 2px" }} />
+                    <DateField value={row.sub.start} max={row.sub.end} onChange={(v) => updateSub(row.task.id, row.sub.id, (s) => ({ ...s, start: v }))} />
                     <span style={{ color: "#9a988f", fontSize: 10 }}>~</span>
-                    <input type="date" value={row.sub.end} min={row.sub.start} onChange={(e) => updateSub(row.task.id, row.sub.id, (s) => ({ ...s, end: e.target.value }))} style={{ flex: 1, fontSize: 11, height: 24, padding: "0 2px" }} />
+                    <DateField value={row.sub.end} min={row.sub.start} onChange={(v) => updateSub(row.task.id, row.sub.id, (s) => ({ ...s, end: v }))} />
                   </div>
                 </div>
               );
@@ -852,7 +951,7 @@ export default function GanttChart() {
 
             {/* Bars */}
             {rows.map((row, idx) => {
-              if (row.type === "addsub" || row.type === "memo") return null;
+              if (row.type === "addsub" || row.type === "memo" || row.type === "comment") return null;
               const isSub = row.type === "subtask";
               const dataObj: SubTask = isSub ? row.sub : row.task;
               const rowTop = row.top + CONTENT_OFFSET;
