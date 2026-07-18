@@ -25,16 +25,17 @@ interface Task extends SubTask {
 }
 
 const RAINBOW: { bg: string; text: string }[] = [
-  { bg: "#E53935", text: "#FFFFFF" },
-  { bg: "#FB8C00", text: "#FFFFFF" },
-  { bg: "#FDD835", text: "#5C4400" },
-  { bg: "#43A047", text: "#FFFFFF" },
-  { bg: "#1E88E5", text: "#FFFFFF" },
-  { bg: "#3949AB", text: "#FFFFFF" },
-  { bg: "#8E24AA", text: "#FFFFFF" },
+  { bg: "#E53935", text: "#FFFFFF" }, // 긴급
+  { bg: "#FB8C00", text: "#FFFFFF" }, // 지연
+  { bg: "#43A047", text: "#FFFFFF" }, // 진행중
+  { bg: "#FDD835", text: "#5C4400" }, // 검토중
+  { bg: "#757575", text: "#FFFFFF" }, // 완료
+  { bg: "#1E88E5", text: "#FFFFFF" }, // 예정
+  { bg: "#3949AB", text: "#FFFFFF" }, // 보류
+  { bg: "#424242", text: "#FFFFFF" }, // 취소
 ];
 
-const LEGEND_LABELS = ["긴급/지연", "진행중", "검토중", "완료", "예정", "보류", "취소"];
+const LEGEND_LABELS = ["긴급", "지연", "진행중", "검토중", "완료", "예정", "보류", "취소"];
 
 const SHAPES: Shape[] = ["rect", "pill", "diamond"];
 
