@@ -39,7 +39,9 @@ const SHAPES: Shape[] = ["rect", "pill", "diamond"];
 const ROW_HEIGHT = 40;
 const MEMO_HEIGHT = 64;
 const ASSIGNEE_WIDTH = 90;
-const LABEL_WIDTH = 240;
+const DEFAULT_LABEL_WIDTH = 240;
+const MIN_LABEL_WIDTH = 140;
+const MAX_LABEL_WIDTH = 600;
 const DATE_COL_WIDTH = 120;
 const MONTH_ROW_HEIGHT = 20;
 const DAY_ROW_HEIGHT = 36;
@@ -78,6 +80,7 @@ interface StoredData {
   dayWidth: number;
   totalDays: number;
   rangeOffset: number;
+  labelWidth?: number;
 }
 
 function loadFromStorage(): StoredData | null {
@@ -225,24 +228,40 @@ function DateField({
 }
 
 export default function GanttChart() {
-  const saved = useMemo(() => loadFromStorage(), []);
-
-  const [tasks, setTasks] = useState<Task[]>(() => saved?.tasks ?? makeInitialTasks());
-  const [dayWidth, setDayWidth] = useState(saved?.dayWidth ?? 32);
-  const [totalDays, setTotalDays] = useState(saved?.totalDays ?? 90);
-  const [rangeOffset, setRangeOffset] = useState(saved?.rangeOffset ?? -7);
+  // Always start from hardcoded defaults so the very first client render matches
+  // the server-rendered HTML exactly. Reading localStorage during the initial
+  // render causes a hydration mismatch on this static page, and — unlike a normal
+  // mismatch that self-corrects — the mismatched DOM attributes never got patched
+  // on subsequent renders, silently freezing the UI at the default sizes forever
+  // even though the actual React state was correct. Persisted values are applied
+  // in an effect below, after mount, which is a real (non-hydration) render pass.
+  const [tasks, setTasks] = useState<Task[]>(() => makeInitialTasks());
+  const [dayWidth, setDayWidth] = useState(32);
+  const [totalDays, setTotalDays] = useState(90);
+  const [rangeOffset, setRangeOffset] = useState(-7);
+  const [labelWidth, setLabelWidth] = useState(DEFAULT_LABEL_WIDTH);
+  const [hydrated, setHydrated] = useState(false);
+  const [isResizingLabel, setIsResizingLabel] = useState(false);
   const [linkSource, setLinkSource] = useState<number | null>(null);
   const [newTaskName, setNewTaskName] = useState("");
 
-  const nextIdRef = useRef(
-    saved ? Math.max(4, ...saved.tasks.map((t) => t.id)) + 1 : 5
-  );
-  const nextSubIdRef = useRef(
-    saved
-      ? Math.max(999, ...saved.tasks.flatMap((t) => t.subtasks.map((s) => s.id))) + 1
-      : 1000
-  );
+  const nextIdRef = useRef(5);
+  const nextSubIdRef = useRef(1000);
   const undoStack = useRef<Task[][]>([]);
+
+  useEffect(() => {
+    const saved = loadFromStorage();
+    if (saved) {
+      setTasks(saved.tasks);
+      setDayWidth(saved.dayWidth);
+      setTotalDays(saved.totalDays);
+      setRangeOffset(saved.rangeOffset);
+      setLabelWidth(saved.labelWidth ?? DEFAULT_LABEL_WIDTH);
+      nextIdRef.current = Math.max(4, ...saved.tasks.map((t) => t.id)) + 1;
+      nextSubIdRef.current = Math.max(999, ...saved.tasks.flatMap((t) => t.subtasks.map((s) => s.id))) + 1;
+    }
+    setHydrated(true);
+  }, []);
 
   // ---- Row reorder drag ----
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
@@ -264,10 +283,13 @@ export default function GanttChart() {
   }
 
   // ---- Persist to localStorage ----
+  // Skip writes until the load effect above has run — otherwise this fires on
+  // the very first commit (still holding hardcoded defaults) and overwrites a
+  // returning user's saved settings before they ever get applied.
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ tasks, dayWidth, totalDays, rangeOffset }));
-  }, [tasks, dayWidth, totalDays, rangeOffset]);
+    if (!hydrated || typeof window === "undefined") return;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ tasks, dayWidth, totalDays, rangeOffset, labelWidth }));
+  }, [hydrated, tasks, dayWidth, totalDays, rangeOffset, labelWidth]);
 
   const today = useMemo(() => {
     const d = new Date();
@@ -304,7 +326,7 @@ export default function GanttChart() {
   useEffect(() => { rowsRef.current = rows; }, [rows]);
   useEffect(() => { tasksRef.current = tasks; }, [tasks]);
 
-  const leftWidth = ASSIGNEE_WIDTH + LABEL_WIDTH + DATE_COL_WIDTH;
+  const leftWidth = ASSIGNEE_WIDTH + labelWidth + DATE_COL_WIDTH;
   const totalHeight = rows.length ? rows[rows.length - 1].top + rows[rows.length - 1].h : 0;
   const fullWidth = leftWidth + totalDays * dayWidth;
 
@@ -618,6 +640,33 @@ export default function GanttChart() {
     dragRef.current = { taskId, subId, mode, startX: e.clientX, origStart: parseDate(start), origEnd: parseDate(end) };
   }
 
+  // ---- Left panel (담당자/작업/시작일 카드) width resize ----
+  const labelDragRef = useRef<{ startX: number; startWidth: number } | null>(null);
+  useEffect(() => {
+    function onMove(e: MouseEvent) {
+      const d = labelDragRef.current;
+      if (!d) return;
+      const dx = e.clientX - d.startX;
+      setLabelWidth(Math.min(MAX_LABEL_WIDTH, Math.max(MIN_LABEL_WIDTH, d.startWidth + dx)));
+    }
+    function onUp() {
+      labelDragRef.current = null;
+      setIsResizingLabel(false);
+    }
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+    return () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    };
+  }, []);
+  function startLabelDrag(e: React.MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    labelDragRef.current = { startX: e.clientX, startWidth: labelWidth };
+    setIsResizingLabel(true);
+  }
+
   // ---- Month header ----
   const monthCells = useMemo(() => {
     const cells: { left: number; width: number; label: string }[] = [];
@@ -753,6 +802,7 @@ export default function GanttChart() {
             onChange={(e) => setTotalDays(Number(e.target.value))}
             style={{ height: 30, padding: "0 4px" }}
           >
+            <option value={30}>30일</option>
             <option value={60}>60일</option>
             <option value={90}>90일</option>
             <option value={180}>180일</option>
@@ -776,9 +826,17 @@ export default function GanttChart() {
             {/* Left panel header */}
             <div style={{ position: "absolute", left: 0, top: 0, width: leftWidth, height: TOTAL_HEADER_HEIGHT, background: "#fff", zIndex: 5, borderRight: "0.5px solid #d8d5cc", display: "flex", alignItems: "flex-end" }}>
               <div style={{ width: ASSIGNEE_WIDTH, padding: "4px 10px", fontWeight: 500, color: "#6b6a64", borderRight: "0.5px solid #d8d5cc", height: DAY_ROW_HEIGHT, display: "flex", alignItems: "center" }}>담당자</div>
-              <div style={{ width: LABEL_WIDTH, padding: "4px 10px", fontWeight: 500, color: "#6b6a64", borderRight: "0.5px solid #d8d5cc", height: DAY_ROW_HEIGHT, display: "flex", alignItems: "center" }}>작업 / 세부 일정</div>
+              <div style={{ width: labelWidth, padding: "4px 10px", fontWeight: 500, color: "#6b6a64", borderRight: "0.5px solid #d8d5cc", height: DAY_ROW_HEIGHT, display: "flex", alignItems: "center" }}>작업 / 세부 일정</div>
               <div style={{ width: DATE_COL_WIDTH, padding: "4px 10px", fontWeight: 500, color: "#6b6a64", height: DAY_ROW_HEIGHT, display: "flex", alignItems: "center" }}>시작일 / 종료일</div>
             </div>
+
+            {/* Drag to resize the whole left card (담당자/작업/시작일) wider or narrower */}
+            <div
+              onMouseDown={startLabelDrag}
+              title="드래그해서 왼쪽 카드 크기 조절"
+              className={`label-resize-handle${isResizingLabel ? " active" : ""}`}
+              style={{ position: "absolute", left: leftWidth - 3, top: 0, width: 6, height: TOTAL_HEADER_HEIGHT, zIndex: 6, cursor: "col-resize" }}
+            />
 
             {/* Month + day header */}
             <div style={{ position: "relative", marginLeft: leftWidth, height: TOTAL_HEADER_HEIGHT, width: totalDays * dayWidth }}>
@@ -867,7 +925,7 @@ export default function GanttChart() {
                 return (
                   <div key={`row-${idx}`}>
                     <div style={{ position: "absolute", left: 0, top, width: ASSIGNEE_WIDTH, height: row.h, borderBottom: "0.5px solid #d8d5cc", borderRight: "0.5px solid #d8d5cc", background: "#f1efe8", zIndex: 1, boxSizing: "border-box" }} />
-                    <div style={{ position: "absolute", left: ASSIGNEE_WIDTH, top, width: LABEL_WIDTH + DATE_COL_WIDTH, height: row.h, display: "flex", alignItems: "center", padding: "0 6px 0 30px", borderBottom: "0.5px solid #d8d5cc", background: "#f1efe8", zIndex: 1, boxSizing: "border-box" }}>
+                    <div style={{ position: "absolute", left: ASSIGNEE_WIDTH, top, width: labelWidth + DATE_COL_WIDTH, height: row.h, display: "flex", alignItems: "center", padding: "0 6px 0 30px", borderBottom: "0.5px solid #d8d5cc", background: "#f1efe8", zIndex: 1, boxSizing: "border-box" }}>
                       <button onClick={() => addSub(row.task.id)} style={{ fontSize: 11, padding: "2px 8px", height: 24 }}>+ 세부 일정 추가</button>
                     </div>
                   </div>
@@ -888,7 +946,7 @@ export default function GanttChart() {
                       <input type="text" value={t.assignee} placeholder="이름" onChange={(e) => updateTask(t.id, (tt) => ({ ...tt, assignee: e.target.value }))} style={{ width: "100%", height: 26, fontSize: 12, padding: "0 6px" }} />
                     </div>
                     {/* Label */}
-                    <div style={{ position: "absolute", left: ASSIGNEE_WIDTH, top, width: LABEL_WIDTH, height: row.h, display: "flex", alignItems: "center", gap: 2, padding: "0 4px", borderBottom: "0.5px solid #d8d5cc", background: bg, zIndex: 1, boxSizing: "border-box" }}>
+                    <div style={{ position: "absolute", left: ASSIGNEE_WIDTH, top, width: labelWidth, height: row.h, display: "flex", alignItems: "center", gap: 2, padding: "0 4px", borderBottom: "0.5px solid #d8d5cc", background: bg, zIndex: 1, boxSizing: "border-box" }}>
                       <span onMouseDown={(e) => startRowDrag(e, "task", t.id)} style={{ cursor: "grab", color: "#ccc", fontSize: 14, flexShrink: 0, userSelect: "none", padding: "0 2px" }} title="드래그해서 순서 변경">⠿</span>
                       <button disabled={!hasSub} onClick={() => toggleExpanded(t.id)} style={{ width: 22, height: 22, padding: 0, border: "none", background: "transparent", flexShrink: 0 }}>
                         {hasSub ? (t.expanded ? "▾" : "▸") : "·"}
@@ -899,7 +957,7 @@ export default function GanttChart() {
                       <button onClick={() => deleteTask(t.id)} style={{ width: 20, height: 20, padding: 0, borderRadius: "50%", flexShrink: 0 }}>✕</button>
                     </div>
                     {/* Date inputs */}
-                    <div style={{ position: "absolute", left: ASSIGNEE_WIDTH + LABEL_WIDTH, top, width: DATE_COL_WIDTH, height: row.h, display: "flex", alignItems: "center", gap: 4, padding: "0 6px", borderBottom: "0.5px solid #d8d5cc", background: bg, zIndex: 1, boxSizing: "border-box", flexWrap: "wrap", alignContent: "flex-start" }}>
+                    <div style={{ position: "absolute", left: ASSIGNEE_WIDTH + labelWidth, top, width: DATE_COL_WIDTH, height: row.h, display: "flex", alignItems: "center", gap: 4, padding: "0 6px", borderBottom: "0.5px solid #d8d5cc", background: bg, zIndex: 1, boxSizing: "border-box", flexWrap: "wrap", alignContent: "flex-start" }}>
                       <DateField value={t.start} max={t.end} onChange={(v) => updateTask(t.id, (tt) => ({ ...tt, start: v }))} />
                       <span style={{ color: "#9a988f", fontSize: 10 }}>~</span>
                       <DateField value={t.end} min={t.start} onChange={(v) => updateTask(t.id, (tt) => ({ ...tt, end: v }))} />
@@ -926,7 +984,7 @@ export default function GanttChart() {
               return (
                 <div key={`row-${idx}`}>
                   <div style={{ position: "absolute", left: 0, top, width: ASSIGNEE_WIDTH, height: row.h, borderBottom: "0.5px solid #d8d5cc", borderRight: "0.5px solid #d8d5cc", background: "#f1efe8", zIndex: 1, boxSizing: "border-box" }} />
-                  <div style={{ position: "absolute", left: ASSIGNEE_WIDTH, top, width: LABEL_WIDTH, height: row.h, display: "flex", alignItems: "center", gap: 2, padding: "0 4px 0 8px", borderBottom: "0.5px solid #d8d5cc", background: "#f1efe8", zIndex: 1, boxSizing: "border-box" }}>
+                  <div style={{ position: "absolute", left: ASSIGNEE_WIDTH, top, width: labelWidth, height: row.h, display: "flex", alignItems: "center", gap: 2, padding: "0 4px 0 8px", borderBottom: "0.5px solid #d8d5cc", background: "#f1efe8", zIndex: 1, boxSizing: "border-box" }}>
                     <span onMouseDown={(e) => startRowDrag(e, "subtask", row.task.id, row.sub.id)} style={{ cursor: "grab", color: "#ccc", fontSize: 14, flexShrink: 0, userSelect: "none", padding: "0 2px" }} title="드래그해서 순서 변경">⠿</span>
                     <input
                       type="text"
@@ -940,7 +998,7 @@ export default function GanttChart() {
                     <button onClick={() => deleteSub(row.task.id, row.sub.id)} style={{ width: 20, height: 20, padding: 0, borderRadius: "50%", flexShrink: 0 }}>✕</button>
                   </div>
                   {/* Date inputs for subtask */}
-                  <div style={{ position: "absolute", left: ASSIGNEE_WIDTH + LABEL_WIDTH, top, width: DATE_COL_WIDTH, height: row.h, display: "flex", alignItems: "center", gap: 4, padding: "0 6px", borderBottom: "0.5px solid #d8d5cc", background: "#f1efe8", zIndex: 1, boxSizing: "border-box" }}>
+                  <div style={{ position: "absolute", left: ASSIGNEE_WIDTH + labelWidth, top, width: DATE_COL_WIDTH, height: row.h, display: "flex", alignItems: "center", gap: 4, padding: "0 6px", borderBottom: "0.5px solid #d8d5cc", background: "#f1efe8", zIndex: 1, boxSizing: "border-box" }}>
                     <DateField value={row.sub.start} max={row.sub.end} onChange={(v) => updateSub(row.task.id, row.sub.id, (s) => ({ ...s, start: v }))} />
                     <span style={{ color: "#9a988f", fontSize: 10 }}>~</span>
                     <DateField value={row.sub.end} min={row.sub.start} onChange={(v) => updateSub(row.task.id, row.sub.id, (s) => ({ ...s, end: v }))} />

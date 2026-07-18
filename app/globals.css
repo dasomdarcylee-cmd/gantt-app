@@ -55,6 +55,14 @@ textarea:focus {
   color: #1a1a18;
 }
 
+.label-resize-handle {
+  background: transparent;
+}
+.label-resize-handle:hover,
+.label-resize-handle.active {
+  background: #185fa5;
+}
+
 /* To Do styles */
 .todo-container {
   background: #fff;
