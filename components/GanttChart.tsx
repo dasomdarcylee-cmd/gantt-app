@@ -34,6 +34,8 @@ const RAINBOW: { bg: string; text: string }[] = [
   { bg: "#8E24AA", text: "#FFFFFF" },
 ];
 
+const LEGEND_LABELS = ["긴급/지연", "진행중", "검토중", "완료", "예정", "보류", "취소"];
+
 const SHAPES: Shape[] = ["rect", "pill", "diamond"];
 
 const ROW_HEIGHT = 40;
@@ -812,6 +814,16 @@ export default function GanttChart() {
           <button aria-label="좁게" onClick={() => setDayWidth((w) => Math.max(16, w - 8))} style={{ width: 30, height: 30 }}>−</button>
           <button aria-label="넓게" onClick={() => setDayWidth((w) => Math.min(60, w + 8))} style={{ width: 30, height: 30 }}>+</button>
         </div>
+      </div>
+
+      {/* ---- Legend ---- */}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 14, marginBottom: 10, fontSize: 12, color: "#6b6a64" }}>
+        {RAINBOW.map((col, i) => (
+          <span key={i} style={{ display: "flex", alignItems: "center", gap: 5 }}>
+            <span style={{ width: 10, height: 10, borderRadius: "50%", background: col.bg, flexShrink: 0 }} />
+            {LEGEND_LABELS[i]}
+          </span>
+        ))}
       </div>
 
       {/* ---- Chart ---- */}
