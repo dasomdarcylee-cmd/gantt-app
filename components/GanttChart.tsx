@@ -29,7 +29,7 @@ const RAINBOW: { bg: string; text: string }[] = [
   { bg: "#FB8C00", text: "#FFFFFF" }, // 지연
   { bg: "#43A047", text: "#FFFFFF" }, // 진행중
   { bg: "#FDD835", text: "#5C4400" }, // 검토중
-  { bg: "#757575", text: "#FFFFFF" }, // 완료
+  { bg: "#E0E0E0", text: "#4A4A4A" }, // 완료
   { bg: "#1E88E5", text: "#FFFFFF" }, // 예정
   { bg: "#3949AB", text: "#FFFFFF" }, // 보류
   { bg: "#424242", text: "#FFFFFF" }, // 취소
