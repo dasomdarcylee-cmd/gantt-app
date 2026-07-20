@@ -519,6 +519,13 @@ export default function GanttChart() {
     return () => document.removeEventListener("keydown", onKeyDown);
   }, []);
 
+  // PWA: register the app-shell service worker for offline support / installability
+  useEffect(() => {
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("/sw.js").catch(() => {});
+    }
+  }, []);
+
   useEffect(() => {
     function onMove(e: MouseEvent) {
       const d = dragRef.current;
